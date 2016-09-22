@@ -2,14 +2,16 @@ try:
     from . import Atomic
 except ImportError:
     from atomic import Atomic  # pylint: disable=relative-import
-from .util import skopeo_copy, get_atomic_config, skopeo_inspect, decompose, write_out
+from .trust import Trust
+from .util import skopeo_copy, get_atomic_config, skopeo_inspect,\
+    decompose, write_out, strip_port, is_insecure_registry
 
 ATOMIC_CONFIG = get_atomic_config()
 
 
 def cli(subparser):
     # atomic pull
-    backend = ATOMIC_CONFIG.get('default_storage', "ostree")
+    backend = ATOMIC_CONFIG.get('default_storage', "docker")
     pullp = subparser.add_parser("pull", help=_("pull latest image from a repository"),
                                  epilog="pull the latest specified image from a repository.")
     pullp.set_defaults(_class=Pull, func='pull_image')
@@ -17,6 +19,8 @@ def cli(subparser):
                        help=_("Specify the storage. Default is currently '%s'.  You can"
                               " change the default by editing /etc/atomic.conf and changing"
                               " the 'default_storage' field." % backend))
+    pullp.add_argument("-t", "--type", dest="reg_type", default=None,
+                       help=_("Pull from an alternative registry type."))
     pullp.add_argument("image", help=_("image id"))
 
 
@@ -25,9 +29,18 @@ class Pull(Atomic):
         _, _, tag = decompose(self.args.image)
         # If no tag is given, we assume "latest"
         tag = tag if tag != "" else "latest"
-        fq_name = skopeo_inspect("docker://{}".format(self.args.image))['Name']
+        if self.args.reg_type == "atomic":
+            pull_uri = 'atomic:'
+        else:
+            pull_uri = 'docker://'
+        fq_name = skopeo_inspect("{}{}".format(pull_uri, self.args.image))['Name']
+        registry, _, _ = decompose(fq_name)
         image = "docker-daemon:{}:{}".format(fq_name, tag)
-        skopeo_copy("docker://{}".format(self.args.image), image, debug=self.args.debug)
+        insecure = True if is_insecure_registry(self.d.info()['RegistryConfig'], strip_port(registry)) else False
+        trust = Trust()
+        trust.set_args(self.args)
+        trust.discover_sigstore(fq_name)
+        skopeo_copy("docker://{}".format(self.args.image), image, debug=self.args.debug, insecure=insecure)
 
     def pull_image(self):
         handlers = {

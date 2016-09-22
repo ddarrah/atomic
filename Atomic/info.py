@@ -28,13 +28,17 @@ def cli_version(subparser):
     versionp.add_argument("-r", "--recurse", default=False, dest="recurse",
                           action="store_true",
                           help=_("recurse through all layers"))
-    versionp.set_defaults(_class=Info, func='info')
+    versionp.set_defaults(_class=Info, func='version')
     versionp.add_argument("image", help=_("container image"))
 
 
 class Info(Atomic):
     def __init__(self):
         super(Info, self).__init__()
+
+    def version(self):
+        self.args.force_remote_info = False
+        self.info()
 
     def info(self):
         """
@@ -46,7 +50,10 @@ class Info(Atomic):
         # Check if the input is an image id associated with more than one
         # repotag.  If so, error out.
         if self.syscontainers.has_system_container_image(self.image):
-            pass
+            if not self.args.force_remote_info:
+                version = self.syscontainers.version(self.image)
+                util.write_out('{0}: {1}'.format(self.image, version))
+                return
         elif self.is_iid():
             self.get_fq_name(self._inspect_image())
         # The input is not an image id
